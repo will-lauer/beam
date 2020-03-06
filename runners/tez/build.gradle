@@ -1,0 +1,94 @@
+import groovy.json.JsonOutput
+
+plugins { id 'org.apache.beam.module' }
+applyJavaNature(automaticModuleName: 'org.apache.beam.runners.tez')
+
+description = "Apache Beam :: Runners :: Tez"
+
+repositories {
+    maven {
+        url "https://artifactory.ouroath.com/artifactory/hadoop-maven-release"
+    }
+}
+
+/*
+ * We need to rely on manually specifying these evaluationDependsOn to ensure that
+ * the following projects are evaluated before we evaluate this project. This is because
+ * we are attempting to reference the "sourceSets.test.output" directly.
+ */
+evaluationDependsOn(":sdks:java:core")
+
+configurations {
+    validatesRunner
+}
+
+project.ext {
+    tez_version = '0.9.1.4.1908081452'
+}
+
+dependencies {
+    compile project(path: ":model:pipeline", configuration: "shadow")
+    compile project(path: ":sdks:java:core", configuration: "shadow")
+    compile project(":runners:core-construction-java")
+    compile project(":runners:core-java")
+    compile "org.apache.tez:tez-api:$tez_version"
+    compile "org.apache.tez:tez-dag:$tez_version"
+    compile "org.apache.tez:tez-mapreduce:$tez_version"
+    compile "org.apache.tez:tez-runtime-library:$tez_version"
+    compile library.java.commons_lang3
+    
+    testCompile project(path: ":sdks:java:core", configuration: "shadowTest")
+    // ApexStateInternalsTest extends abstract StateInternalsTest
+    testCompile project(path: ":runners:core-java", configuration: "testRuntime")
+    testCompile library.java.hamcrest_core
+    testCompile library.java.junit
+    testCompile library.java.mockito_core
+    testCompile library.java.jackson_dataformat_yaml
+    
+    validatesRunner project(path: ":sdks:java:core", configuration: "shadowTest")
+    validatesRunner project(path: ":runners:core-java", configuration: "testRuntime")
+    validatesRunner project(project.path)
+
+    constraints {
+        compile("org.apache.hadoop:hadoop-mapreduce-client-common:2.8.5")
+        compile("org.apache.hadoop:hadoop-yarn-client:2.8.5")
+        compile("org.apache.hadoop:hadoop-yarn-server-web-proxy:2.8.5")
+    }
+}
+
+task validatesRunnerBatch(type: Test) {
+    group = "Verification"
+    systemProperty "beamTestPipelineOptions", JsonOutput.toJson(["--runner=TestTezRunner",])
+
+    classpath = configurations.validatesRunner
+    testClassesDirs = files(project(":sdks:java:core").sourceSets.test.output.classesDirs)
+    useJUnit {
+        includeCategories 'org.apache.beam.sdk.testing.ValidatesRunner'
+        excludeCategories 'org.apache.beam.sdk.testing.FlattenWithHeterogeneousCoders'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesAttemptedMetrics'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesCommittedMetrics'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesImpulse'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesParDoLifecycle'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesTestStream'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesTimersInParDo'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesTimerMap'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesMetricsPusher'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesUnboundedSplittableParDo'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesUnboundedPCollections'
+        // TODO[BEAM-8304]: Support multiple side inputs with different coders.
+        excludeCategories 'org.apache.beam.sdk.testing.UsesSideInputsWithDifferentCoders'
+        excludeCategories 'org.apache.beam.sdk.testing.UsesBundleFinalizer'
+    }
+
+    // apex runner is run in embedded mode. Increase default HeapSize
+    maxHeapSize = '4g'
+}
+
+task validatesRunner {
+    group = "Verification"
+    description "Validates Tez runner"
+    dependsOn validatesRunnerBatch
+}
+
+// Generates :runners:tez:runQuickstartJavaTez
+createJavaExamplesArchetypeValidationTask(type: 'Quickstart', runner:'Tez')
